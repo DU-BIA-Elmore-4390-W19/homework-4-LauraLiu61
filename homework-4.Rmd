@@ -1,7 +1,7 @@
 ---
 title: 'Homework 4: Bags, Forests, Boosts, oh my'
-author: "Your Name Goes Here"
-date: "2/28/2019"
+author: "Yao Liu"
+date: "3/1/2019"
 output: github_document
 ---
 
@@ -9,12 +9,114 @@ output: github_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Problem 1
+```{r libs, message = F, warning = F, include = F}
+library(tidyverse)
+library(broom)
+library(glmnet)
+library(caret)
+library(ISLR)
+library(janitor)
+library(stringr)
+library(rpart)
+library(rpart.plot)
+library(partykit)
+library(randomForest)
+library(MASS)
+library(gbm)
+library(tree)
+theme_set(theme_bw())
+```
 
+## Problem 1
 Problem 7 from Chapter 8 in the text. To be specific, please use a sequence of
 `ntree` from 25 to 500 in steps of 25 and `mtry` from 3 to 9 for by 1. 
 
-## Answer 1
+In the lab, we applied random forests to the Boston data using mtry=6 and using ntree=25 and ntree=500. Create a plot displaying the test error resulting from random forests on this data set for a more comprehensive range of values for mtry and ntree. You can model your plot after Figure 8.10. Describe the results obtained
+## Answer1 v1.0
+
+set.seed(10086)
+library(doMC)
+registerDoMC(cores = 4)
+df <- tbl_df(Boston)
+attach(Boston)
+inTraining <- createDataPartition(medv, p = .5, list = F )
+training <- df[inTraining, ]
+testing  <- df[-inTraining, ]
+
+boston_frame <- data_frame(ntree =  rep(seq(25,500,by=25),each = 7),
+                      mtry = rep(seq(3,9),20),
+                      mse = rep(NA, length(ntree)) 
+
+)
+rp <- rep(seq(25,500,by=25))
+for (i in 1:length(rp)) {
+  boston_rf <- train(medv ~ ., 
+                      data = training,
+                      method = "rf",
+                      ntree = rp[i],
+                      tuneGrid = data.frame(mtry = 3:9))
+  for(n in 1:7){
+    boston_frame[(i-1)*7+n,'mse'] <- boston_rf$results$RMSE[n]
+  } 
+}
+test_preds <- predict(boston_rf, newdata = testing)
+boston_frame[i,'mse'] <- mean((test_preds - testing$medv)^2)
+
+p <- ggplot(data = boston_frame, aes(x=ntree, y=mse, group = mtry, col = as.factor(mtry)))
+p + geom_line()+
+  geom_point()+
+  xlab("Number of Trees") + ylab("Training error")+
+  scale_color_brewer()
+   theme_bw()
+
+From the line graph above, it's clear that when the ntree = 450, the rmse is the smallest; when the ntree = 175, the rmse is the second to the second smallest. 
+
+##Answer1 v2.0
+```{r}
+library(doMC)
+registerDoMC(cores = 4)
+set.seed(10086)
+for (k in 1:20){
+  inTraining <- createDataPartition(df$medv, p = .75, list = F)
+  training <- df[inTraining, ]
+  testing <- df[-inTraining, ]
+  mtry <- c(3:9)
+  ntree <- seq(25, 500, len = 20)
+  results <- tibble(trial = rep(NA, 140),
+  mtry = rep(NA, 140),
+  ntree = rep(NA, 140),
+  mse = rep(NA, 140)) 
+  for(i in 1:7){
+    cat(sprintf('Trial: %s, mtry: %s --- %s\n', k, mtry[i], Sys.time()))
+    for(j in 1:20){ 
+      boston_rf2 <- randomForest(medv ~ .,
+                               data = training,
+                               mtry = mtry[i],
+                               ntree = ntree[j])
+      mse <- mean((predict( boston_rf2, newdata = testing) - testing$medv)^2)
+      results[(i-1)*20 + j, ] <- c(k, mtry[i], ntree[j], mse)
+    }
+  }
+  if(exists("results_total")){
+  results_total <- bind_rows(results_total, results)
+  }
+  else(
+  results_total <- results
+  )
+}
+
+```
+```{r}
+p <- ggplot(data = results, 
+            aes(x = ntree, y = mse, group = mtry, col = mtry))
+p + geom_line()+
+  geom_point()+
+  xlab("Number of Trees") + ylab("Testing Error")+
+  scale_color_gradient2("mtry")
+  theme_bw()
+```
+
+
 
 ## Problem 2
 
@@ -27,3 +129,143 @@ test MSE.
 2. Fit a multiple regression model to the training data and report the 
 estimated test MSE
 3. Summarize your results. 
+
+(a)
+```{r}
+set.seed(9823)
+df <- tbl_df(Carseats)
+attach(Carseats)
+inTraining <- createDataPartition(Sales, p = .5, list = F )
+training <- df[inTraining, ]
+testing  <- df[-inTraining, ]
+```
+
+(b) regression tree
+```{r}
+tree <- tree(Sales ~ ., data = training)
+summary(tree)
+plot(tree)
+text(tree, pretty = 0)
+```
+```{r}
+y_pred <- predict(tree, newdata = testing) 
+mean((y_pred - testing$Sales)^2)
+```
+The test MSE is 5.2938
+
+(c)Use cross-validation in order to determine the optimal level of tree complexity. 
+Does pruning the tree improve the test MSE
+```{r}
+set.seed(9832) 
+fit_control <- trainControl(method = "repeatedcv",
+                           number = 10, 
+                           repeats = 10)           #specify the control parameter
+cv_carseats_tree <- train(Sales ~ ., 
+                        data = training,
+                        method = "rpart2", 
+                        trControl = fit_control,
+                        tuneGrid = data.frame(maxdepth = 1:7))   
+plot(cv_carseats_tree)
+cv_carseats_tree
+```
+The final value used for the model was maxdepth = 3.Predict the test set MSE using the tree from the CV training (maxdepth = 3)
+
+```{r}
+test_preds <- predict(cv_carseats_tree, newdata = testing)   
+carseats_test_df <- testing %>%
+  mutate(y_hat = test_preds,
+         sq_err = (y_hat - Sales)^2)
+mean(carseats_test_df$sq_err)
+```
+The pruning tree improve the test MSE, from 5.29 to 4.93 
+
+(d) Use the bagging approach in order to analyze this data. What test MSE do you obtain? Use the
+importance() function to determine which variables are most important
+```{r}
+set.seed(10086)
+bag_carseats <- randomForest(Sales ~ ., data = training, mtry = 10, ntree = 100)  
+bag_carseats
+```
+```{r}
+test_preds <- predict(bag_carseats, newdata = testing)
+carseats_test_df <- carseats_test_df %>%
+  mutate(y_hat_carseats = test_preds,
+         sq_err_bags = (y_hat_carseats - Sales)^2) 
+mean(carseats_test_df$sq_err_bags) 
+```
+
+```{r}
+varImpPlot(bag_carseats, sort = TRUE, n.var = min(10, nrow(bag_carseats$importance)))
+
+```
+ShelveLoc, Price, CompPrice, Income and Advertising are the top five most important variables.
+
+(e) Use random forests to analyze this data. What test MSE do you obtain? Use the importance() function to determine which vari-ables are most important. Describe the effect of m,thenumberof variables  considered  at  each  split,  on  the error  rate obtained
+```{r}
+rf_carseats <- randomForest(Sales ~ ., 
+                          data = training,
+                          mtry = 3)  #m=square root of p, we have a Test MSE of 3.3
+test_preds <- predict(rf_carseats, newdata = testing)
+carseats_test_df <- carseats_test_df %>%
+  mutate(y_hat_rf = test_preds,
+         sq_err_rf = (y_hat_rf - Sales)^2)
+mean(carseats_test_df$sq_err_rf)
+```
+
+```{r}
+varImpPlot(rf_carseats, sort = TRUE, n.var = min(10, nrow(bag_carseats$importance)))
+```
+The test MSE is 3.5582. ShelveLoc, Price, CompPrice, Advertising and Age are the top five most important variables.
+
+(f) Gradient Boosting Regression 
+
+```{r}
+set.seed(9832)
+grid <- expand.grid(interaction.depth = c(1, 3), 
+                    n.trees = seq(0, 2000, by = 100),
+                    shrinkage = c(.01, 0.001),
+                    n.minobsinnode = 10)
+trainControl <- trainControl(method = "cv", number = 5)     
+gbm_carseats <- train(Sales ~ ., 
+                    data = training, 
+                    distribution = "gaussian", 
+                    method = "gbm",                       #method for gradient boosted
+                    trControl = trainControl, 
+                    tuneGrid = grid,
+                    verbose = FALSE) 
+gbm_carseats
+```
+```{r}
+test_preds <- predict(gbm_carseats, newdata = testing)
+carseats_test_df <- carseats_test_df %>%
+  mutate(y_hat_gbm = test_preds,
+         sq_err_gbm = (y_hat_gbm - Sales)^2)
+mean(carseats_test_df$sq_err_gbm)
+```
+The test MSE is 1.8019
+
+(g) multiple regression 
+```{r}
+multireg <- lm(Sales ~ . ,
+                 data = training)   
+test_preds <- predict(multireg, newdata = testing)
+carseats_test_df <- carseats_test_df %>%
+  mutate(y_hat_mul = test_preds,
+         err_mul = (y_hat_mul - Sales)^2)
+mean(carseats_test_df$err_mul)
+```
+The test MSE for multiple regression is 1.0127
+
+(h) Summary
+
+```{r}
+p <- dplyr::select(carseats_test_df, sq_err_rf, 
+                   sq_err_bags, sq_err_gbm, err_mul) %>%
+  gather(method, sq_err) %>%
+  ggplot(aes(sq_err, fill = method))
+p + geom_density(alpha = .3) +
+  scale_x_continuous("squared error", limits = c(0, 50)) +
+  scale_fill_brewer(palette = "Dark2",
+                    labels = c("RF", "Bags", "GB", "Multi-Regre")) 
+```
+
