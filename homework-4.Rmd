@@ -76,6 +76,8 @@ From the line graph above, it's clear that when the ntree = 450, the rmse is the
 library(doMC)
 registerDoMC(cores = 4)
 set.seed(10086)
+df <- tbl_df(Boston)
+attach(Boston)
 for (k in 1:20){
   inTraining <- createDataPartition(df$medv, p = .75, list = F)
   training <- df[inTraining, ]
@@ -140,18 +142,16 @@ training <- df[inTraining, ]
 testing  <- df[-inTraining, ]
 ```
 
-(b) regression tree
+### regression tree
 ```{r}
-tree <- tree(Sales ~ ., data = training)
-summary(tree)
-plot(tree)
-text(tree, pretty = 0)
+tree <- rpart::rpart(Sales ~ ., data = training)
+prp(tree)
 ```
 ```{r}
 y_pred <- predict(tree, newdata = testing) 
 mean((y_pred - testing$Sales)^2)
 ```
-The test MSE is 5.2938
+The test MSE is 4.4845
 
 (c)Use cross-validation in order to determine the optimal level of tree complexity. 
 Does pruning the tree improve the test MSE
@@ -179,6 +179,7 @@ mean(carseats_test_df$sq_err)
 ```
 The pruning tree improve the test MSE, from 5.29 to 4.93 
 
+###Bagging
 (d) Use the bagging approach in order to analyze this data. What test MSE do you obtain? Use the
 importance() function to determine which variables are most important
 ```{r}
@@ -200,6 +201,7 @@ varImpPlot(bag_carseats, sort = TRUE, n.var = min(10, nrow(bag_carseats$importan
 ```
 ShelveLoc, Price, CompPrice, Income and Advertising are the top five most important variables.
 
+###Random Forests
 (e) Use random forests to analyze this data. What test MSE do you obtain? Use the importance() function to determine which vari-ables are most important. Describe the effect of m,thenumberof variables  considered  at  each  split,  on  the error  rate obtained
 ```{r}
 rf_carseats <- randomForest(Sales ~ ., 
@@ -217,7 +219,7 @@ varImpPlot(rf_carseats, sort = TRUE, n.var = min(10, nrow(bag_carseats$importanc
 ```
 The test MSE is 3.5582. ShelveLoc, Price, CompPrice, Advertising and Age are the top five most important variables.
 
-(f) Gradient Boosting Regression 
+###Gradient Boosting Regression
 
 ```{r}
 set.seed(9832)
@@ -244,7 +246,7 @@ mean(carseats_test_df$sq_err_gbm)
 ```
 The test MSE is 1.8019
 
-(g) multiple regression 
+### Multiple regression 
 ```{r}
 multireg <- lm(Sales ~ . ,
                  data = training)   
@@ -256,7 +258,7 @@ mean(carseats_test_df$err_mul)
 ```
 The test MSE for multiple regression is 1.0127
 
-(h) Summary
+### Summary
 
 ```{r}
 p <- dplyr::select(carseats_test_df, sq_err_rf, 
